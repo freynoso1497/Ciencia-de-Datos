@@ -234,21 +234,8 @@ def build_retention_view(df_base, _model, feature_names, threshold, campaign_cos
 # ======================================================================
 
 # --- Funciones Auxiliares para Altair ---
-TARGET = "ventas_2025-10-02.csv"
-CANDIDATES = [Path("."), Path("./include"), Path("./data"), Path("./datasets"), Path("./notebooks"), Path("./PROYECTO")]
+ALTAIR_DATA_URL = "https://github.com/freynoso1497/Ciencia-de-Datos/releases/download/release/Dataset"
 TIME_WINDOW_DAYS = 540
-
-def find_csv(name=TARGET):
-    p = Path(name)
-    if p.is_file(): return str(p.resolve())
-    for base in CANDIDATES:
-        for f in base.rglob(name):
-            if f.is_file(): return str(f.resolve())
-    for base in CANDIDATES:
-        for f in base.rglob("ventas*.csv"):
-            if f.is_file():
-                return str(f.resolve())
-    return None
 
 def minmax(s: pd.Series):
     s = s.astype(float)
@@ -261,15 +248,18 @@ def minmax(s: pd.Series):
 def create_altair_charts():
     """Carga, transforma los datos (ventas_2025-10-02.csv) y genera SOLO los tres gráficos de Altair requeridos."""
     
-    csv_path = find_csv()
+    csv_path = ALTAIR_DATA_URL
     if not csv_path:
-        return {"error": "No se encontró el archivo 'ventas_2025-10-02.csv'."}
+        return {"error": "No se pudo resolver la URL del dataset remoto para los reportes."}, None, None
 
     usecols = ["Cliente","CreadoEl","Documento","Localidad","Oficina","Vendedor","ValorNeto","ClaseVenta","DenominacionClase"]
     try:
         df = pd.read_csv(csv_path, usecols=usecols, engine="pyarrow")
     except Exception:
-        df = pd.read_csv(csv_path, usecols=usecols)
+        try:
+            df = pd.read_csv(csv_path, usecols=usecols)
+        except Exception as e:
+            return {"error": f"No se pudo cargar el dataset remoto desde {csv_path}. Detalle: {e}"}, None, None
 
     # --- Lógica de Limpieza, Filtrado, Dispersión y Score (Copiada del notebook) ---
     df["CreadoEl"] = pd.to_datetime(df["CreadoEl"], dayfirst=True, errors="coerce", cache=True)
