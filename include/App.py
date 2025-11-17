@@ -9,12 +9,15 @@ import math
 # ======================================================================
 # --- 1. CONFIGURACIÓN INICIAL Y CARGA DE ACTIVOS ---
 # ======================================================================
-BASE_DIR = Path(__file__).resolve().parent  # carpeta donde está App.py
-MODEL_PATH = 'modelo_churn_final.joblib'
-FEATURES_PATH = 'features_list.joblib'
-DATA_PATH = 'cust_df_final_for_streamlit.csv' 
-ADJUSTED_THRESHOLD = 0.30  
-CAMPAIGN_COST = 100000  # costo mensual de campaña de retención por cliente
+# Carpeta donde está este archivo App.py
+BASE_DIR = Path(__file__).resolve().parent
+
+# Paths a los archivos dentro de esa carpeta
+MODEL_PATH = BASE_DIR / "modelo_churn_final.joblib"
+FEATURES_PATH = BASE_DIR / "features_list.joblib"
+DATA_PATH = BASE_DIR / "cust_df_final_for_streamlit.csv"
+ADJUSTED_THRESHOLD = 0.30
+CAMPAIGN_COST = 100000
 
 # --- Funciones Auxiliares para Carga de Activos ---
 
