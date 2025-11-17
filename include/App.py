@@ -9,7 +9,7 @@ import math
 # ======================================================================
 # --- 1. CONFIGURACIÓN INICIAL Y CARGA DE ACTIVOS ---
 # ======================================================================
-
+BASE_DIR = Path(__file__).resolve().parent  # carpeta donde está App.py
 MODEL_PATH = 'modelo_churn_final.joblib'
 FEATURES_PATH = 'features_list.joblib'
 DATA_PATH = 'cust_df_final_for_streamlit.csv' 
