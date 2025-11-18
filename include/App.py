@@ -325,16 +325,16 @@ def create_altair_charts():
 # --- 4. DISEÑO DE LA APLICACIÓN PRINCIPAL (TABS) ---
 # ======================================================================
 
-st.title("Sistema de Predicción y Reportes de Churn")
+st.title("Sistema Churn Prediction de Clientes")
 st.markdown("Navega entre la predicción de clientes y los reportes de diagnóstico.")
 
 # Crear las tarjetas (Tabs)
-tab_intro, tab_modelo, tab_reportes, tab_mapa, tab_retencion = st.tabs([
+tab_intro, tab_modelo, tab_retencion,tab_mapa, tab_reportes, = st.tabs([
     "ℹ️ Introducción",
-    "🚀 Modelo (Predicción de Clientes)",
-    "📊 Reportes (Análisis Altair)",
-    "🗺️ Mapa",
-    "💰 Retención"
+    "🚀 Predicción de Clientes",
+    "💰 Retención de Clientes",
+    "🗺️ Mapa clientes",
+    "📊 Reportes (Con Altair)",
 ])
 
 
