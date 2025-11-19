@@ -5,6 +5,9 @@ import numpy as np
 import altair as alt
 from pathlib import Path
 import math
+import io
+import ssl
+from urllib import request
 
 # ======================================================================
 # --- 1. CONFIGURACIÓN INICIAL Y CARGA DE ACTIVOS ---
@@ -237,6 +240,42 @@ def build_retention_view(df_base, _model, feature_names, threshold, campaign_cos
 ALTAIR_DATA_URL = "https://github.com/freynoso1497/Ciencia-de-Datos/releases/download/release/Dataset"
 TIME_WINDOW_DAYS = 540
 
+def _looks_like_cert_error(exc: Exception) -> bool:
+    """Detecta si la excepción proviene de un error de certificado SSL."""
+    return isinstance(exc, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(exc)
+
+
+def _read_csv_disabling_ssl(csv_path: str, usecols):
+    """Descarga el CSV ignorando la verificación SSL para entornos con certificados incompletos."""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with request.urlopen(csv_path, context=ctx) as resp:
+        raw = resp.read()
+    return pd.read_csv(io.BytesIO(raw), usecols=usecols)
+
+
+def load_altair_dataset(csv_path: str, usecols):
+    """Intenta leer el dataset remoto con distintos motores y cae en fallback sin SSL si es necesario."""
+    last_exc = None
+    read_variants = (
+        {"engine": "pyarrow"},
+        {},
+    )
+    for variant in read_variants:
+        try:
+            read_kwargs = {"usecols": usecols, **variant}
+            return pd.read_csv(csv_path, **read_kwargs)
+        except Exception as exc:
+            last_exc = exc
+
+    if last_exc and _looks_like_cert_error(last_exc):
+        return _read_csv_disabling_ssl(csv_path, usecols)
+
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("No se pudo leer el dataset remoto y no se obtuvo excepción detallada.")
+
 def minmax(s: pd.Series):
     s = s.astype(float)
     rng = s.max() - s.min()
@@ -246,20 +285,17 @@ def minmax(s: pd.Series):
 
 @st.cache_data
 def create_altair_charts():
-    """Carga, transforma los datos (ventas_2025-10-02.csv) y genera SOLO los tres gráficos de Altair requeridos."""
+    """Carga, transforma los datos (ventas_2025-10-02.csv) y genera los reportes de Altair."""
     
     csv_path = ALTAIR_DATA_URL
     if not csv_path:
-        return {"error": "No se pudo resolver la URL del dataset remoto para los reportes."}, None, None
+        return {"error": "No se pudo resolver la URL del dataset remoto para los reportes."}, None, None, None
 
     usecols = ["Cliente","CreadoEl","Documento","Localidad","Oficina","Vendedor","ValorNeto","ClaseVenta","DenominacionClase"]
     try:
-        df = pd.read_csv(csv_path, usecols=usecols, engine="pyarrow")
-    except Exception:
-        try:
-            df = pd.read_csv(csv_path, usecols=usecols)
-        except Exception as e:
-            return {"error": f"No se pudo cargar el dataset remoto desde {csv_path}. Detalle: {e}"}, None, None
+        df = load_altair_dataset(csv_path, usecols)
+    except Exception as e:
+        return {"error": f"No se pudo cargar el dataset remoto desde {csv_path}. Detalle: {e}"}, None, None, None
 
     # --- Lógica de Limpieza, Filtrado, Dispersión y Score (Copiada del notebook) ---
     df["CreadoEl"] = pd.to_datetime(df["CreadoEl"], dayfirst=True, errors="coerce", cache=True)
@@ -317,9 +353,42 @@ def create_altair_charts():
           .transform_window(rank="rank(n)", sort=[alt.SortField("n", order="descending")]).transform_filter("datum.rank <= 20")
           .mark_bar().encode(x=alt.X("tipo:N", sort="-y", title="Tipo de pedido"), y=alt.Y("pct:Q", title="Participación", axis=alt.Axis(format="%")), tooltip=[alt.Tooltip("tipo:N", title="Tipo"), alt.Tooltip("n:Q", title="# Operaciones"), alt.Tooltip("pct:Q", title="% sobre alta dispersión", format=".1%")] )
           .properties(title="Distribución de tipos de pedido en clientes de ALTA dispersión (Top 20)").interactive())
-    
-    # Retornamos SOLO los tres gráficos principales.
-    return chart_clientes, chart_localidades, chart_tipos
+
+    # (4) Relación recencia vs. dispersión (no es gráfico de barras)
+    scatter_data = risk.dropna(subset=["recency_dias", "max_gap"]).copy()
+    if not scatter_data.empty:
+        scatter_data["Cliente"] = scatter_data["Cliente"].astype(str)
+        chart_recencia_disp = (
+            alt.Chart(scatter_data)
+            .mark_circle(opacity=0.7)
+            .encode(
+                x=alt.X("recency_dias:Q", title="Días desde la última compra"),
+                y=alt.Y("max_gap:Q", title="Máx gap entre compras"),
+                color=alt.Color(
+                    "churn_score:Q",
+                    title="Churn score",
+                    scale=alt.Scale(scheme="inferno"),
+                ),
+                size=alt.Size("compras:Q", title="# Compras", scale=alt.Scale(range=[30, 400])),
+                tooltip=[
+                    alt.Tooltip("Cliente:N", title="Cliente"),
+                    alt.Tooltip("recency_dias:Q", title="Recencia (días)"),
+                    alt.Tooltip("max_gap:Q", title="Máximo gap (días)"),
+                    alt.Tooltip("compras:Q", title="# Compras"),
+                    alt.Tooltip("churn_score:Q", title="Churn score", format=".2f"),
+                ],
+            )
+            .properties(title="Recencia vs dispersión", height=360)
+            .interactive()
+        )
+    else:
+        chart_recencia_disp = (
+            alt.Chart(pd.DataFrame({"mensaje": ["Sin datos suficientes para graficar"]}))
+            .mark_text()
+            .encode(text="mensaje:N")
+        )
+
+    return chart_clientes, chart_localidades, chart_tipos, chart_recencia_disp
 
 # ======================================================================
 # --- 4. DISEÑO DE LA APLICACIÓN PRINCIPAL (TABS) ---
@@ -452,7 +521,7 @@ with tab_reportes:
         st.info("Generando gráficos. (Optimizados con caché).")
         
         try:
-            chart_clientes, chart_localidades, chart_tipos = create_altair_charts()
+            chart_clientes, chart_localidades, chart_tipos, chart_recencia_disp = create_altair_charts()
 
             if isinstance(chart_clientes, dict) and 'error' in chart_clientes:
                  st.error(chart_clientes['error'])
@@ -474,6 +543,11 @@ with tab_reportes:
                 # Este gráfico incluye el slider de 'gap_thr' integrado en la definición de Altair
                 st.subheader("Distribución de Tipos de Pedido en Alta Dispersión")
                 st.altair_chart(chart_tipos, use_container_width=True)
+
+                # 3. Cuarto gráfico: recencia vs dispersión (no es un gráfico de barras)
+                st.subheader("Recencia vs. Dispersión")
+                st.caption("Explora qué tan espaciadas están las compras y cuántos días pasaron desde la última transacción.")
+                st.altair_chart(chart_recencia_disp, use_container_width=True)
 
 
         except Exception as e:
