@@ -417,7 +417,7 @@ with tab_intro:
     - **Predicción por cliente**: calcula probabilidad de churn con un modelo previamente entrenado (`modelo_churn_final.joblib`).
     - **Reportes Altair**: gráficos de dispersión/recencia y tipos de pedido para entender comportamientos agregados.
     - **Mapa**: visualización geográfica de riesgo y abandono por localidad tomando coordenadas predefinidas.
-    - **Retención**: combina gasto mensual (`monetary_mean`) y probabilidad de churn para evaluar si vale la pena invertir en una campaña (costo asumido: 100.000/mes).
+    - **Retención**: combina gasto mensual (`monetary_mean`) y probabilidad de churn para evaluar si vale la pena invertir en una campaña.
     
     **Datos**: se cargan de `cust_df_final_for_streamlit.csv` y se usan las columnas listadas en `features_list.joblib`. El identificador de cliente es `cliente_id`.
     """)
@@ -518,7 +518,7 @@ with tab_reportes:
     
     # Botón para generar y mostrar los reportes
     if st.button('Generar y Mostrar Reportes Gráficos (Altair)', key='report_gen_btn'):
-        st.info("Generando gráficos. (Optimizados con caché).")
+        st.info("Generando gráficos.")
         
         try:
             chart_clientes, chart_localidades, chart_tipos, chart_recencia_disp = create_altair_charts()
@@ -587,58 +587,70 @@ with tab_mapa:
 # --- TAB 4: RETENCIÓN ---
 with tab_retencion:
     st.header("Análisis de Retención y Gasto Mensual")
-    st.markdown(f"Evaluamos si conviene una campaña de retención considerando un costo mensual de **{CAMPAIGN_COST:,.0f}**.")
-
-    retention_df, error_msg = build_retention_view(cust_df_full, model, feature_names, ADJUSTED_THRESHOLD, CAMPAIGN_COST)
-    if error_msg:
-        st.error(error_msg)
-    elif retention_df.empty:
-        st.info("No hay datos suficientes para calcular gasto mensual promedio.")
+    campaign_cost_input = st.number_input(
+        "Costo mensual estimado de la campaña",
+        min_value=0,
+        value=0,
+        step=1000,
+        help="Ingresa el presupuesto mensual para comparar contra el gasto promedio de cada cliente.",
+    )
+    if campaign_cost_input <= 0:
+        st.info("Ingresa un costo mensual mayor a cero para ver los indicadores de retención.")
     else:
-        # KPIs
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            st.metric("Clientes analizados", f"{len(retention_df):,}")
-        with col_b:
-            st.metric("Clientes donde conviene retener", f"{(retention_df['Conviene_retener']).sum():,}")
-        with col_c:
-            st.metric("Promedio gasto mensual", f"{retention_df['Gasto_mensual_prom'].mean():,.0f}")
+        st.markdown(f"Evaluamos si conviene una campaña de retención considerando un costo mensual de **{campaign_cost_input:,.0f}**.")
 
-        st.markdown("**Top clientes (valor x riesgo)**")
-        st.dataframe(
-            retention_df[['cliente_id', 'Gasto_mensual_prom', 'Probabilidad_Churn', 'Riesgo', 'Conviene_retener', 'Score_valor_riesgo']]
-            .head(25),
-            use_container_width=True
+        retention_df, error_msg = build_retention_view(
+            cust_df_full, model, feature_names, ADJUSTED_THRESHOLD, campaign_cost_input
         )
+        if error_msg:
+            st.error(error_msg)
+        elif retention_df.empty:
+            st.info("No hay datos suficientes para calcular gasto mensual promedio.")
+        else:
+            # KPIs
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                st.metric("Clientes analizados", f"{len(retention_df):,}")
+            with col_b:
+                st.metric("Clientes donde conviene retener", f"{(retention_df['Conviene_retener']).sum():,}")
+            with col_c:
+                st.metric("Promedio gasto mensual", f"{retention_df['Gasto_mensual_prom'].mean():,.0f}")
 
-        # Controles de visualización
-        col_filt, col_log = st.columns(2)
-        with col_filt:
-            only_retain = st.checkbox("Mostrar solo clientes donde conviene retener", value=False)
-        with col_log:
-            use_log_x = st.checkbox("Usar escala logarítmica en X", value=False)
-
-        scatter_df = retention_df.copy()
-        if only_retain:
-            scatter_df = scatter_df[scatter_df['Conviene_retener']]
-        count_points = len(scatter_df)
-        st.caption(f"Puntos en el gráfico: {count_points}")
-
-        # Gráfico: dispersión gasto vs probabilidad
-        x_field = alt.X(
-            'Gasto_mensual_prom:Q',
-            title='Gasto mensual promedio',
-            scale=alt.Scale(type='log') if use_log_x else alt.Scale(),
-        )
-        scatter = (alt.Chart(scatter_df)
-            .mark_circle(size=80, opacity=0.7)
-            .encode(
-                x=x_field,
-                y=alt.Y('Probabilidad_Churn:Q', title='Probabilidad de churn'),
-                color=alt.Color('Conviene_retener:N', title='Conviene retener'),
-                tooltip=['cliente_id', 'Gasto_mensual_prom', 'Probabilidad_Churn', 'Riesgo']
+            st.markdown("**Top clientes (valor x riesgo)**")
+            st.dataframe(
+                retention_df[['cliente_id', 'Gasto_mensual_prom', 'Probabilidad_Churn', 'Riesgo', 'Conviene_retener', 'Score_valor_riesgo']]
+                .head(25),
+                use_container_width=True
             )
-            .properties(height=320)
-        )
 
-        st.altair_chart(scatter, use_container_width=True)
+            # Controles de visualización
+            col_filt, col_log = st.columns(2)
+            with col_filt:
+                only_retain = st.checkbox("Mostrar solo clientes donde conviene retener", value=False)
+            with col_log:
+                use_log_x = st.checkbox("Usar escala logarítmica en X", value=False)
+
+            scatter_df = retention_df.copy()
+            if only_retain:
+                scatter_df = scatter_df[scatter_df['Conviene_retener']]
+            count_points = len(scatter_df)
+            st.caption(f"Puntos en el gráfico: {count_points}")
+
+            # Gráfico: dispersión gasto vs probabilidad
+            x_field = alt.X(
+                'Gasto_mensual_prom:Q',
+                title='Gasto mensual promedio',
+                scale=alt.Scale(type='log') if use_log_x else alt.Scale(),
+            )
+            scatter = (alt.Chart(scatter_df)
+                .mark_circle(size=80, opacity=0.7)
+                .encode(
+                    x=x_field,
+                    y=alt.Y('Probabilidad_Churn:Q', title='Probabilidad de churn'),
+                    color=alt.Color('Conviene_retener:N', title='Conviene retener'),
+                    tooltip=['cliente_id', 'Gasto_mensual_prom', 'Probabilidad_Churn', 'Riesgo']
+                )
+                .properties(height=320)
+            )
+
+            st.altair_chart(scatter, use_container_width=True)
