@@ -54,6 +54,17 @@ def load_model(model_path, features_path):
 model, feature_names = load_model(MODEL_PATH, FEATURES_PATH)
 cust_df_full = load_data(DATA_PATH)
 
+# Parámetros interactivos
+st.sidebar.header("Configuración del modelo")
+current_threshold = st.sidebar.slider(
+    "Umbral de probabilidad para marcar riesgo alto",
+    min_value=0.0,
+    max_value=1.0,
+    value=float(ADJUSTED_THRESHOLD),
+    step=0.01,
+    help="Clientes con probabilidad mayor o igual a este valor serán considerados de alto riesgo.",
+)
+
 # ======================================================================
 # --- 2. FUNCIONES CENTRALES DEL MODELO ---
 # ======================================================================
@@ -77,7 +88,7 @@ def predict_all_clients(df, _model, feature_names, threshold):
 
 
 @st.cache_data
-def prepare_map_data():
+def prepare_map_data(threshold):
     """Prepara datos agregados por localidad con coordenadas y métricas de churn."""
     # Coordenadas conocidas
     coords = {
@@ -109,7 +120,7 @@ def prepare_map_data():
     }
 
     # Predicciones y unión con churn real (si existe)
-    df_pred = predict_all_clients(cust_df_full, model, feature_names, ADJUSTED_THRESHOLD)
+    df_pred = predict_all_clients(cust_df_full, model, feature_names, threshold)
     base = df_pred.merge(
         cust_df_full[['cliente_id', 'churn']] if 'churn' in cust_df_full.columns else pd.DataFrame(),
         on='cliente_id',
@@ -426,13 +437,13 @@ with tab_intro:
 # --- TAB 1: MODELO (PREDICCIÓN) ---
 with tab_modelo:
     st.header("Predicción de Churn por Cliente")
-    st.markdown(f"Utiliza el umbral ajustado: **{ADJUSTED_THRESHOLD}**")
+    st.markdown(f"Utiliza el umbral ajustado: **{current_threshold:.2f}**")
 
     # 1. Filtro de Alto Riesgo (Ver todos los clientes)
     st.subheader("Análisis Global de Riesgo")
     if st.button(' Ver Clientes con ALTO Riesgo de Churn'):
         with st.spinner('Calculando riesgos para todos los clientes...'):
-            df_predictions = predict_all_clients(cust_df_full, model, feature_names, ADJUSTED_THRESHOLD)
+            df_predictions = predict_all_clients(cust_df_full, model, feature_names, current_threshold)
             df_high_risk = df_predictions[df_predictions['Riesgo'] == 'ALTO'].sort_values(
                 by='Probabilidad_Churn', ascending=False
             ).reset_index(drop=True)
@@ -453,7 +464,7 @@ with tab_modelo:
 
         if st.button('Ver riesgo de Churn para la Localidad seleccionada'):
             with st.spinner('Calculando riesgos para la localidad...'):
-                df_predictions = predict_all_clients(cust_df_full, model, feature_names, ADJUSTED_THRESHOLD)
+                df_predictions = predict_all_clients(cust_df_full, model, feature_names, current_threshold)
                 df_filtered = df_predictions[df_predictions['Riesgo'] == 'ALTO']
                 if selected_loc != 'Todas' and 'Localidad' in df_filtered.columns:
                     df_filtered = df_filtered[df_filtered['Localidad'] == selected_loc]
@@ -496,7 +507,7 @@ with tab_modelo:
             try:
                 proba = model.predict_proba(df_input)[:, 1][0]
                 
-                if proba >= ADJUSTED_THRESHOLD:
+                if proba >= current_threshold:
                     prediccion = 'ALTO RIESGO de CHURN (Se recomienda intervención)'
                     st.error(f" **Riesgo de Abandono:** {prediccion}")
                 else:
@@ -560,7 +571,7 @@ with tab_mapa:
     st.header("Mapa de riesgo por Localidad")
     st.markdown("Visualiza distribución de churn y riesgo alto por localidad sobre un mapa de Argentina.")
     try:
-        plot_map = prepare_map_data()
+        plot_map = prepare_map_data(current_threshold)
         if plot_map.empty:
             st.info("No hay datos de localidad mapeables o no coinciden con el diccionario de coordenadas.")
         else:
@@ -600,7 +611,7 @@ with tab_retencion:
         st.markdown(f"Evaluamos si conviene una campaña de retención considerando un costo mensual de **{campaign_cost_input:,.0f}**.")
 
         retention_df, error_msg = build_retention_view(
-            cust_df_full, model, feature_names, ADJUSTED_THRESHOLD, campaign_cost_input
+            cust_df_full, model, feature_names, current_threshold, campaign_cost_input
         )
         if error_msg:
             st.error(error_msg)
